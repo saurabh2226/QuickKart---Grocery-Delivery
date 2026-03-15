@@ -1,0 +1,121 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        (request.auth.token.email == "saurabhccs11@gmail.com" && request.auth.token.email_verified == true)
+      );
+    }
+
+    function isDelivery() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'delivery';
+    }
+
+    function isShopOwner() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'shop_owner';
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    function uidUnchanged() {
+      return !('userId' in request.resource.data) || request.resource.data.userId == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('userId' in request.resource.data) || request.resource.data.userId == resource.data.userId;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUser(data) {
+      return data.uid is string &&
+             data.role in ['customer', 'admin', 'delivery', 'shop_owner'] &&
+             data.walletBalance is number &&
+             data.createdAt is string;
+    }
+
+    function isValidAddress(data) {
+      return data.userId is string &&
+             data.label is string && data.label.size() < 50 &&
+             data.houseNo is string && data.houseNo.size() < 100 &&
+             data.street is string && data.street.size() < 200 &&
+             data.city is string && data.city.size() < 100 &&
+             data.pincode is string && data.pincode.size() < 20 &&
+             data.createdAt is string;
+    }
+
+    function isValidOrder(data) {
+      return data.userId is string &&
+             data.items is list && data.items.size() > 0 && data.items.size() < 100 &&
+             data.totalAmount is number && data.totalAmount >= 0 &&
+             data.deliveryFee is number && data.deliveryFee >= 0 &&
+             data.paymentMethod in ['COD', 'UPI', 'Wallet'] &&
+             data.status in ['pending', 'accepted', 'out_for_delivery', 'delivered', 'cancelled'] &&
+             data.address is map &&
+             data.createdAt is string;
+    }
+
+    function isValidWalletTransaction(data) {
+      return data.userId is string &&
+             data.amount is number && data.amount > 0 &&
+             data.type in ['credit', 'debit'] &&
+             data.description is string && data.description.size() < 200 &&
+             data.createdAt is string;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin() || isDelivery() || isShopOwner();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (
+        (isOwner(userId) && request.resource.data.role == 'customer') || isAdmin()
+      );
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (
+        (isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /addresses/{addressId} {
+      allow read: if isDocOwner() || isAdmin() || isDelivery() || isShopOwner();
+      allow create: if isAuthenticated() && isValidAddress(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && isValidAddress(request.resource.data) && uidNotModified() && (isDocOwner() || isAdmin());
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow read: if isDocOwner() || isAdmin() || isDelivery() || isShopOwner();
+      allow create: if isAuthenticated() && isValidOrder(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && isValidOrder(request.resource.data) && uidNotModified() && (isDocOwner() || isAdmin() || isDelivery() || isShopOwner());
+      allow delete: if isAdmin();
+    }
+
+    match /wallet_transactions/{transactionId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidWalletTransaction(request.resource.data) && uidUnchanged();
+      allow update: if isAdmin(); // Only admin can update transactions
+      allow delete: if isAdmin();
+    }
+  }
+}

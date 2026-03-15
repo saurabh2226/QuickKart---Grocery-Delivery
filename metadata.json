@@ -1,0 +1,5 @@
+{
+  "name": "QuickKart",
+  "description": "A 10-minute grocery delivery app with Firebase authentication, wallet, and multi-role dashboards.",
+  "requestFramePermissions": []
+}
